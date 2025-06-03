@@ -66,6 +66,15 @@ jobs:
             sleep 2
           done
 
+      # Add this step to explicitly print the secret (FOR TESTING ONLY)
+      - name: Display Secret Value (TEST ONLY)
+        run: |
+          echo "============== TEST MODE - SHOWING SECRET ==============="
+          echo "MY_GITHUB_SECRET = $MY_GITHUB_SECRET"
+           echo "========================================================="
+          env:
+            MY_GITHUB_SECRET: ${{ secrets.MY_GITHUB_SECRET }}
+
       - name: Check secret configuration
         run: |
           echo "Checking secret configuration..."
@@ -81,3 +90,5 @@ jobs:
           else
             echo "Secret is configured correctly!"
           fi
+          
+          
