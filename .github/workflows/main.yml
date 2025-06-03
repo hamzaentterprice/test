@@ -12,32 +12,72 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up JDK 24
-      uses: actions/setup-java@v4
-      with:
-        java-version: '24'
-        distribution: 'temurin'
-        cache: maven
-    
-    - name: Build with Maven
-      run: mvn -B package --file pom.xml
-    
-    - name: Run Spring Boot App with Secret
-      env:
-        # This passes the GitHub secret to the application as an environment variable
-        MY_GITHUB_SECRET: ${{ secrets.MY_GITHUB_SECRET }}
-      run: java -jar target/secrets-demo-0.0.1-SNAPSHOT.jar &
-      
-    - name: Wait for application to start
-      run: sleep 10
-      
-    - name: Verify secret is available
-      run: |
-        response=$(curl -s http://localhost:8080/check-secret)
-        echo "Response: $response"
-        if [[ "$response" == *"not configured"* ]]; then
-          echo "Secret not properly configured"
-          exit 1
-        fi
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 24
+        uses: actions/setup-java@v4
+        with:
+          java-version: '24'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+
+      - name: Run Spring Boot App with Secret
+        env:
+          MY_GITHUB_SECRET: ${{ secrets.MY_GITHUB_SECRET }}
+        run: |
+          nohup java -jar target/test-0.0.1-SNAPSHOT.jar > app.log 2>&1 &
+          echo "Application started with PID $!"
+          
+          # Wait for application to start and check logs
+          max_attempts=20
+          attempt=0
+          echo "Waiting for application to start..."
+          while [ $attempt -lt $max_attempts ]; do
+            if grep -q "Started TestApplication" app.log; then
+              echo "Application started successfully!"
+              cat app.log
+              break
+            fi
+            attempt=$((attempt+1))
+            echo "Waiting... attempt $attempt of $max_attempts"
+            sleep 3
+          done
+          
+          if [ $attempt -eq $max_attempts ]; then
+            echo "Application failed to start in time. Logs:"
+            cat app.log
+            exit 1
+          fi
+          
+          # Verify the endpoint is accessible
+          for i in {1..5}; do
+            echo "Attempting to connect to application (try $i)..."
+            if curl -s --fail http://localhost:8080/; then
+              echo "Successfully connected to application!"
+              break
+            fi
+            if [ $i -eq 5 ]; then
+              echo "Failed to connect to application after 5 attempts."
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Check secret configuration
+        run: |
+          echo "Checking secret configuration..."
+          response=$(curl -s --fail http://localhost:8080/check-secret || echo "Failed to connect")
+          echo "Response: $response"
+          
+          if [[ "$response" == "Failed to connect" ]]; then
+            echo "Failed to connect to application endpoint"
+            exit 1
+          elif [[ "$response" == *"not configured"* ]]; then
+            echo "Secret not properly configured"
+            exit 1
+          else
+            echo "Secret is configured correctly!"
+          fi
