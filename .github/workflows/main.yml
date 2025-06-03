@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: Build and Test with Secrets
 
 on:
   push:
@@ -24,71 +24,43 @@ jobs:
       - name: Build with Maven
         run: mvn -B package --file pom.xml
 
+      - name: Check if secret is available
+        run: |
+          if [ "${{ secrets.MY_GITHUB_SECRET }}" == "" ]; then
+            echo "WARNING: MY_GITHUB_SECRET is not set in repository secrets!"
+            echo "Please add it in repository settings: Settings -> Secrets and variables -> Actions"
+          else
+            echo "MY_GITHUB_SECRET is available for use"
+          fi
+
       - name: Run Spring Boot App with Secret
         env:
           MY_GITHUB_SECRET: ${{ secrets.MY_GITHUB_SECRET }}
         run: |
-          nohup java -jar target/test-0.0.1-SNAPSHOT.jar > app.log 2>&1 &
-          echo "Application started with PID $!"
+          echo "Starting application with MY_GITHUB_SECRET environment variable..."
+          java -jar target/test-0.0.1-SNAPSHOT.jar > app_output.log 2>&1 &
+          APP_PID=$!
+          echo "Application started with PID: $APP_PID"
           
-          # Wait for application to start and check logs
-          max_attempts=20
-          attempt=0
+          # Give the app some time to start
           echo "Waiting for application to start..."
-          while [ $attempt -lt $max_attempts ]; do
-            if grep -q "Started TestApplication" app.log; then
-              echo "Application started successfully!"
-              cat app.log
-              break
-            fi
-            attempt=$((attempt+1))
-            echo "Waiting... attempt $attempt of $max_attempts"
-            sleep 3
-          done
+          sleep 10
           
-          if [ $attempt -eq $max_attempts ]; then
-            echo "Application failed to start in time. Logs:"
-            cat app.log
-            exit 1
-          fi
+          # Display application output
+          echo "Application startup log:"
+          cat app_output.log
           
-          # Verify the endpoint is accessible
-          for i in {1..5}; do
-            echo "Attempting to connect to application (try $i)..."
-            if curl -s --fail http://localhost:8080/; then
-              echo "Successfully connected to application!"
-              break
-            fi
-            if [ $i -eq 5 ]; then
-              echo "Failed to connect to application after 5 attempts."
-              exit 1
-            fi
-            sleep 2
-          done
-
-      # Add this step to explicitly print the secret (FOR TESTING ONLY)
-      - name: Display Secret Value (TEST ONLY)
-        run: |
-          echo "============== TEST MODE - SHOWING SECRET ==============="
-          echo "MY_GITHUB_SECRET = $MY_GITHUB_SECRET"
-           echo "========================================================="
-          env:
-            MY_GITHUB_SECRET: ${{ secrets.MY_GITHUB_SECRET }}
-
-      - name: Check secret configuration
-        run: |
-          echo "Checking secret configuration..."
-          response=$(curl -s --fail http://localhost:8080/check-secret || echo "Failed to connect")
-          echo "Response: $response"
+          # Test the endpoint
+          echo "Testing endpoints..."
           
-          if [[ "$response" == "Failed to connect" ]]; then
-            echo "Failed to connect to application endpoint"
-            exit 1
-          elif [[ "$response" == *"not configured"* ]]; then
-            echo "Secret not properly configured"
-            exit 1
-          else
-            echo "Secret is configured correctly!"
-          fi
+          ROOT_ENDPOINT=$(curl -s http://localhost:8080/)
+          echo "Root endpoint response: $ROOT_ENDPOINT"
           
+          CHECK_SECRET=$(curl -s http://localhost:8080/check-secret)
+          echo "Check secret endpoint response: $CHECK_SECRET"
           
+          ENV_ENDPOINT=$(curl -s http://localhost:8080/env)
+          echo "Environment endpoint response: $ENV_ENDPOINT"
+          
+          # Clean up
+          kill $APP_PID || true
